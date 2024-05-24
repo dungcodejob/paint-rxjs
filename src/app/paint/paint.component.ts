@@ -3,6 +3,7 @@ import { Component, ElementRef, OnInit, inject } from '@angular/core';
 import {
   Subject,
   fromEvent,
+  map,
   merge,
   scan,
   startWith,
@@ -10,8 +11,8 @@ import {
   takeUntil,
 } from 'rxjs';
 
-type PointerEventName = 'mousedown' | 'mousemove' | 'mouseup' | 'mouseleave';
 
+type ScanHandlerFn<T> = (state: T) => T;
 @Component({
   selector: 'app-paint',
   standalone: true,
@@ -20,44 +21,40 @@ type PointerEventName = 'mousedown' | 'mousemove' | 'mouseup' | 'mouseleave';
   styleUrl: './paint.component.css',
 })
 export class PaintComponent implements OnInit {
-  private readonly _elementRef = inject(ElementRef);
-  resetSubject = new Subject<void>();
+  private readonly element = inject(ElementRef).nativeElement;
 
-  move$ = fromEvent<PointerEvent>(this._elementRef.nativeElement, 'mousemove');
-  down$ = fromEvent<PointerEvent>(this._elementRef.nativeElement, 'mousedown');
-  leave$ = fromEvent<PointerEvent>(
-    this._elementRef.nativeElement,
-    'mouseleave'
-  );
-  up$ = fromEvent<PointerEvent>(this._elementRef.nativeElement, 'mouseup');
+  down$ = fromEvent<PointerEvent>(this.element, 'mousedown');
+  move$ = fromEvent<PointerEvent>(this.element, 'mousemove');
+  leave$ = fromEvent<PointerEvent>(this.element, 'mouseleave');
+  up$ = fromEvent<PointerEvent>(this.element, 'mouseup');
+
+  resetSubject = new Subject<void>();
 
   reset$ = this.resetSubject.asObservable();
 
   clicks$ = merge(
-    this.down$.pipe(
-      switchMap((pointer) =>
-        this.move$.pipe(
-          startWith(pointer),
-          takeUntil(merge(this.up$, this.leave$))
+    this.down$
+      .pipe(
+        switchMap((event) =>
+          this.move$.pipe(
+            startWith(event),
+            takeUntil(merge(this.leave$, this.up$))
+          )
         )
-      ),
-      scan((state: PointerEvent[], event) => [...state, event], [])
+      )
+      .pipe(map(accumulationHandler)),
+    this.reset$.pipe(map(resetHandler)),
+  ).pipe(scan((state: PointerEvent[], fn) => fn(state), []));
 
-      // switchMap((event) =>
-      //   this.reset$.pipe<PointerEvent[]>(
-      //     map(() => [] as PointerEvent[]),
-      //     scan((state: PointerEvent[], event) => [...state, event], [])
-      //   )
-      // )
-    )
-  );
 
-  ngOnInit(): void {
-    console.log(this._elementRef);
-  }
-
-  // clicks$ = merge(
-  //   this.start$.pipe<PointerEvent[]>(map(() => [])),
-  //   this.reset$.pipe<PointerEvent[]>(map(() => []))
-  // ).pipe(switchMap(() => this.move$));
+  ngOnInit(): void {}
 }
+
+const resetHandler =
+  (): ScanHandlerFn<PointerEvent[]> => (state: PointerEvent[]) =>
+    [];
+
+const accumulationHandler =
+  (event: PointerEvent): ScanHandlerFn<PointerEvent[]> =>
+  (state: PointerEvent[]) =>
+    [...state, event];
